@@ -1,0 +1,29 @@
+{
+  "name": "eth-deployer",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/atvanguard/eth-deployer.git"
+  },
+  "author": "Arpit Agarwal <93arpit@gmail.com>",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/atvanguard/eth-deployer/issues"
+  },
+  "homepage": "https://github.com/atvanguard/eth-deployer#readme",
+  "devDependencies": {
+    "typescript": "^3.6.3"
+  },
+  "dependencies": {
+    "@types/node": "^12.7.7",
+    "@types/web3": "^1.0.19",
+    "amqplib": "^0.5.5",
+    "web3": "^1.2.1"
+  }
+}
