@@ -12,7 +12,7 @@ export default class Sender {
   }
 
   async deploy(msg: string) {
-    const q = 'hello2'
+    const q = 'deposit-test-1'
     await this.queue.sendToQueue(q, msg)
     console.log(" [x] Sent", JSON.parse(msg).contract);
   }

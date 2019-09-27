@@ -24,6 +24,18 @@ export default class Web3Client {
     })
   }
 
+  transaction(abi, address, method, args) {
+    return new Promise((resolve, reject) => {
+      const contract = new this.web3.eth.Contract(abi, address)
+      contract.methods[method](...args)
+      .send(this.options)
+      .on('transactionHash', (transactionHash) => {
+        resolve(transactionHash)
+      })
+      .catch(reject)
+    })
+  }
+
   async isConfirmed(txHash: string, blocks) {
     const tx = await this.web3.eth.getTransaction(txHash)
     // console.log('tx', tx)

@@ -1,17 +1,18 @@
 import { QClient } from './QClient'
 import Web3Client from './Web3Client'
 import fs from 'fs'
-import BN from 'bn.js'
 
 export default class Worker {
   private queue: QClient
   private web3Client: Web3Client
   private artifactsDir: string
+  private blockConfirmation: number
 
-  constructor(provider, QClient, options, artifactsDir) {
+  constructor(provider, QClient, options, artifactsDir, blockConfirmation) {
     this.queue = QClient;
     this.web3Client = new Web3Client(provider, options);
     this.artifactsDir = artifactsDir
+    this.blockConfirmation = blockConfirmation
   }
 
   start(q) {
@@ -19,69 +20,102 @@ export default class Worker {
       const job = JSON.parse(msg.content.toString())
       console.log("[x] Received %s", job.contract);
 
-      // check if previous job was done
-      if (job.id !=0) {
-        await this.isJobComplete(job.id - 1)
-        await this._writeContractAddressToFile(job.id - 1)
+      // check if this job is already in progress
+      const status = this._getJobStatus(job.id)
+      if (status == 'progress') {
+        const receipt = await this.waitForConfirmation(job.id)
+        return this._onJobCompletion(job, receipt)
+      } else if (status == 'complete') {
+        return this.queue.channel.ack(msg)
       }
 
-      if (job.contract === 'finish') {
-        console.log('finished, closing connection now ...')
-        this.queue.channel.ack(msg)
-        this.queue.channel.close()
-        process.exit(0)
+      if (job.type == 'deploy') {
+        await this.handleDeploy(q, msg, job)
+      } else if (job.type == 'transaction') {
+        await this.handleTransaction(q, msg, job)
+      } else if (job.type == 'end') {
+        await this.handleEnd(msg)
+        return
+      } else {
+        throw new Error('job type not recognised')
       }
-
-      const artifact = this._getArtifact(job)
-      if (!Worker.validateBytecode(artifact.bytecode)) {
-        console.log('Invalid bytecode for', job.contract)
-        throw new Error('Invalid bytecode')
-      }
-
-      const txHash = await this.web3Client.deploy(artifact.abi, artifact.bytecode, job.args)
-      console.log('txHash for', job, 'is', txHash)
-      const status = this._getStatus()
-      status[job.id] = { contract: job.contract, txHash }
-      console.log(status)
-      this._writeStatusToFile(status)
-      console.log('acking and closing channel now...')
-      this.queue.channel.ack(msg)
-      this.queue.channel.close()
 
       // wait for tx confirmation before consuming new messages
-      await Worker.delay(2)
-      await this.isJobComplete(job.id)
-      console.log('opening channel again...')
-      await this.queue.createChannel()
-      this.start(q)
+      await Worker.delay(2) // this is required bcoz polling the tx too soon fucks up ganache response
+      const receipt = await this.waitForConfirmation(job.id)
+      this._onJobCompletion(job, receipt)
+      this.queue.channel.ack(msg)
     }, {})
   }
 
-  isJobComplete(jobId) {
-    // assuming artifactsDir is same in all jobs
+  private _getJobStatus(jobId) {
     const status = this._getStatus()
     const job = status[jobId]
-    console.log('waiting for job', job, 'to get confirmed')
-    return this.waitForConfirmation(job.txHash)
+    return job ? job.status : 'process'
   }
 
-  async waitForConfirmation(txHash) {
-    // console.log('waiting on', txHash, 'to get confirmed...')
-    while (true) {
-      if (await this.web3Client.isConfirmed(txHash, 6)) {
-        console.log(txHash, 'confirmed')
-        break;
-      }
-      await Worker.delay(5)
+  private _onJobCompletion(job, receipt) {
+    console.log('job completed')
+    const status = this._getStatus()
+    if (job.type == 'deploy') {
+      status[job.id].address = receipt.contractAddress
+    } else if (job.type == 'transaction') {
+      // status[job.id].events = receipt.events
+    } else {
+      throw new Error('job type not recognized')
     }
+    status[job.id].status = 'complete'
+    this._writeStatusToFile(status)
   }
 
-  private async _writeContractAddressToFile(jobId) {
+  async handleEnd(msg) {
+    console.log('finished, closing connection now ...')
+    this.queue.channel.ack(msg)
+    await Worker.delay(2) // if closed too soon, msg doesnt get acked
+    this.queue.channel.close()
+    process.exit(0)
+  }
+
+  async handleTransaction(q, msg, job) {
+    const artifact = this._getArtifact(job)
+    const address = this._getAddressForContract(job.contract)
+    console.log('job.contract', job.contract, 'address', address)
+    const txHash = await this.web3Client.transaction(artifact.abi, address, job.method, this._processArgs(job.args))
+    const status = this._getStatus()
+    status[job.id] = { ...job, txHash, status: 'progress'}
+    console.log(status)
+    this._writeStatusToFile(status)
+  }
+
+  async handleDeploy(q, msg, job) {
+    const artifact = this._getArtifact(job)
+    artifact.bytecode = this.linkBytecode(artifact.bytecode)
+    if (!Worker.validateBytecode(artifact.bytecode)) {
+      console.log('Invalid bytecode for', job.contract)
+      throw new Error('Invalid bytecode')
+    }
+
+    job.args = this._processArgs(job.args)
+    const txHash = await this.web3Client.deploy(artifact.abi, artifact.bytecode, job.args)
+    console.log('txHash for', job, 'is', txHash)
+    const status = this._getStatus()
+    status[job.id] = { ...job, txHash, status: 'progress'}
+    console.log(status)
+    this._writeStatusToFile(status)
+  }
+
+  async waitForConfirmation(jobId) {
     const status = this._getStatus()
     const job = status[jobId]
-    const receipt = await this.web3Client.web3.eth.getTransactionReceipt(job.txHash)
-    status[jobId].address = receipt.contractAddress
-    this._writeStatusToFile(status)
+    const txHash = job.txHash
+    console.log('waiting for job', job, 'to get confirmed')
+    while (true) {
+      if (await this.web3Client.isConfirmed(txHash, this.blockConfirmation)) {
+        console.log(txHash, 'confirmed')
+        return this.web3Client.web3.eth.getTransactionReceipt(txHash)
+      }
+      await Worker.delay(5) // something like blockConfirmation * blockTime
+    }
   }
 
   private _getStatus() {
@@ -112,8 +146,35 @@ export default class Worker {
   }
 
   static validateBytecode(bytecode) {
-    const b = new BN(bytecode.slice(2), 'hex')
-    return b.toString('hex') == bytecode.slice(2)
+    var regex = RegExp('0[xX][0-9a-fA-F]+')
+    return regex.test(bytecode)
+  }
+
+  linkBytecode(bytecode) {
+    let index = bytecode.indexOf('__')
+    while(index > -1) {
+      let lib = bytecode.slice(index, index + 40).slice(2)
+      lib = lib.slice(0, lib.indexOf('_'))
+      const libAddress = this._getAddressForContract(lib)
+      console.log('replacing', lib, 'with', libAddress)
+      bytecode = bytecode.replace(`__${lib}` + '_'.repeat(40 - (lib.length + 2)), libAddress.slice(2))
+      index = bytecode.indexOf('__')
+    }
+    return bytecode
+  }
+
+  private _getAddressForContract(contract) {
+    const status = this._getStatus()
+    for (let i = 0; i < Object.keys(status).length; i++) {
+      if (status[i].contract === contract) return status[i].address
+    }
+    throw new Error(`${contract} not found in status file`)
+  }
+
+  private _processArgs(args) {
+    // console.log('args', args)
+    return args.map(arg => {
+      return (arg.value || this._getAddressForContract(arg))
+    })
   }
 }
-

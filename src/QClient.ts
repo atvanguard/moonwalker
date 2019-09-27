@@ -27,6 +27,7 @@ export class QClient {
   }
 
   async consume(q, callback, options) {
+    await this.channel.assertQueue(q, { durable: false });
     return this.channel.consume(q, callback, options)
   }
 }
