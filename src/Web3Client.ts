@@ -1,7 +1,7 @@
 import Web3 from 'web3'
 
 export default class Web3Client {
-  private web3: Web3
+  public web3: Web3
   private options: Object
 
   constructor(provider, options) {
@@ -24,20 +24,20 @@ export default class Web3Client {
     })
   }
 
-  async isConfirmed(txHash: string) {
+  async isConfirmed(txHash: string, blocks) {
     const tx = await this.web3.eth.getTransaction(txHash)
     // console.log('tx', tx)
     if (!tx.blockNumber) {
       console.log(`${txHash} is still pending`)
-      return { status: false }
+      return false
     }
     const block = await this.web3.eth.getBlock('latest')
 
-    if (block.number - tx.blockNumber >= 6) {
-      return { status: true, receipt: await this.web3.eth.getTransactionReceipt(txHash) }
+    if (block.number - tx.blockNumber >= blocks) {
+      return true
     } else {
       console.log(`current block is at ${block.number} while tx was in ${tx.blockNumber}`)
-      return { status: false }
+      return false
     }
   }
 }

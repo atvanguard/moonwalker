@@ -1,6 +1,7 @@
 import { QClient } from './QClient'
 import Web3Client from './Web3Client'
 import fs from 'fs'
+import BN from 'bn.js'
 
 export default class Worker {
   private queue: QClient
@@ -19,11 +20,26 @@ export default class Worker {
       console.log("[x] Received %s", job.contract);
 
       // check if previous job was done
-      if (job.id !=0) await this.isPreviousJobComplete(job)
+      if (job.id !=0) {
+        await this.isJobComplete(job.id - 1)
+        await this._writeContractAddressToFile(job.id - 1)
+      }
+
+      if (job.contract === 'finish') {
+        console.log('finished, closing connection now ...')
+        this.queue.channel.ack(msg)
+        this.queue.channel.close()
+        process.exit(0)
+      }
 
       const artifact = this._getArtifact(job)
+      if (!Worker.validateBytecode(artifact.bytecode)) {
+        console.log('Invalid bytecode for', job.contract)
+        throw new Error('Invalid bytecode')
+      }
+
       const txHash = await this.web3Client.deploy(artifact.abi, artifact.bytecode, job.args)
-      console.log('txHash is', txHash)
+      console.log('txHash for', job, 'is', txHash)
       const status = this._getStatus()
       status[job.id] = { contract: job.contract, txHash }
       console.log(status)
@@ -33,52 +49,39 @@ export default class Worker {
       this.queue.channel.close()
 
       // wait for tx confirmation before consuming new messages
-      await this.waitForConfirmation(txHash)
+      await Worker.delay(2)
+      await this.isJobComplete(job.id)
       console.log('opening channel again...')
       await this.queue.createChannel()
       this.start(q)
     }, {})
   }
 
-  isPreviousJobComplete(job) {
+  isJobComplete(jobId) {
     // assuming artifactsDir is same in all jobs
     const status = this._getStatus()
-    const previousJob = status[job.id - 1]
-    return this.waitForConfirmation(previousJob.txHash)
-
+    const job = status[jobId]
+    console.log('waiting for job', job, 'to get confirmed')
+    return this.waitForConfirmation(job.txHash)
   }
 
   async waitForConfirmation(txHash) {
-    // poll tx until it is confirmed
-    let _receipt
+    // console.log('waiting on', txHash, 'to get confirmed...')
     while (true) {
-      console.log('sleeping for 2 secs...')
-      await delay(2 * 1000);
-
-      const { status, receipt } = await this.web3Client.isConfirmed(txHash)
-      if (status) {
+      if (await this.web3Client.isConfirmed(txHash, 6)) {
         console.log(txHash, 'confirmed')
-        _receipt = receipt
         break;
       }
+      await Worker.delay(5)
     }
-    this._writeContractAddressToFile(txHash, _receipt.contractAddress)
   }
 
-  private _writeContractAddressToFile(txHash, contractAddress) {
+  private async _writeContractAddressToFile(jobId) {
     const status = this._getStatus()
-    let found = false
-    Object.keys(status).forEach(id => {
-      if (status[id].txHash === txHash) {
-        status[id].address = contractAddress
-        found = true
-      }
-    })
-    if (!found) {
-      console.log('did not find', txHash, 'in status file')
-    } else {
-      this._writeStatusToFile(status)
-    }
+    const job = status[jobId]
+    const receipt = await this.web3Client.web3.eth.getTransactionReceipt(job.txHash)
+    status[jobId].address = receipt.contractAddress
+    this._writeStatusToFile(status)
   }
 
   private _getStatus() {
@@ -100,10 +103,17 @@ export default class Worker {
   }
 
   private _getArtifact(job) {
-    return JSON.parse(fs.readFileSync(`${job.artifactsDir}/${job.contract}.json`).toString())
+    return JSON.parse(fs.readFileSync(`${this.artifactsDir}/${job.contract}.json`).toString())
+  }
+
+  static delay(s: number) {
+    console.log('sleeping for', s, 'secs...')
+    return new Promise( resolve => setTimeout(resolve, s * 1000) );
+  }
+
+  static validateBytecode(bytecode) {
+    const b = new BN(bytecode.slice(2), 'hex')
+    return b.toString('hex') == bytecode.slice(2)
   }
 }
 
-function delay(ms: number) {
-  return new Promise( resolve => setTimeout(resolve, ms) );
-}
