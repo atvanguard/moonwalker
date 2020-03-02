@@ -11,9 +11,8 @@ export default class Sender {
     await this.queue.initialize()
   }
 
-  async deploy(msg: string) {
-    const q = 'deposit-test-1'
+  async deploy(msg: string, q = 'default-deposit-q') {
     await this.queue.sendToQueue(q, msg)
-    console.log(" [x] Sent", JSON.parse(msg).contract);
+    console.log("[x] Queued", JSON.parse(msg).contract);
   }
 }

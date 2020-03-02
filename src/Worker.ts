@@ -6,12 +6,14 @@ export default class Worker {
   private queue: QClient
   private web3Client: Web3Client
   private artifactsDir: string
+  private buildFolder: string
   private blockConfirmation: number
 
-  constructor(provider, QClient, options, artifactsDir, blockConfirmation) {
+  constructor(provider, QClient, options, buildFolder, blockConfirmation) {
     this.queue = QClient;
     this.web3Client = new Web3Client(provider, options);
-    this.artifactsDir = artifactsDir
+    this.buildFolder = buildFolder
+    this.artifactsDir = `${buildFolder}/contracts`
     this.blockConfirmation = blockConfirmation
   }
 
@@ -30,9 +32,9 @@ export default class Worker {
       }
 
       if (job.type == 'deploy') {
-        await this.handleDeploy(q, msg, job)
+        await this.handleDeploy(job)
       } else if (job.type == 'transaction') {
-        await this.handleTransaction(q, msg, job)
+        await this.handleTransaction(job)
       } else if (job.type == 'end') {
         await this.handleEnd(msg)
         return
@@ -57,6 +59,11 @@ export default class Worker {
   private _onJobCompletion(job, receipt) {
     console.log('job completed')
     const status = this._getStatus()
+    if (receipt.status == false) {
+      status[job.id].status = 'reverted'
+      this._writeStatusToFile(status)
+      throw new Error(`reverted: ${JSON.stringify(receipt, null, 2)}`)
+    }
     if (job.type == 'deploy') {
       status[job.id].address = receipt.contractAddress
     } else if (job.type == 'transaction') {
@@ -76,9 +83,10 @@ export default class Worker {
     process.exit(0)
   }
 
-  async handleTransaction(q, msg, job) {
-    const artifact = this._getArtifact(job)
-    const address = this._getAddressForContract(job.contract)
+  async handleTransaction(job) {
+    const artifact = this._getArtifact(job.contract)
+    // To make it possible to use abi and address from different truffle artifacts
+    const address = this._getAddressForContract(job.addressArtifact || job.contract)
     console.log('job.contract', job.contract, 'address', address)
     const txHash = await this.web3Client.transaction(artifact.abi, address, job.method, this._processArgs(job.args))
     const status = this._getStatus()
@@ -87,8 +95,8 @@ export default class Worker {
     this._writeStatusToFile(status)
   }
 
-  async handleDeploy(q, msg, job) {
-    const artifact = this._getArtifact(job)
+  async handleDeploy(job) {
+    const artifact = this._getArtifact(job.contract)
     artifact.bytecode = this.linkBytecode(artifact.bytecode)
     if (!Worker.validateBytecode(artifact.bytecode)) {
       console.log('Invalid bytecode for', job.contract)
@@ -120,7 +128,7 @@ export default class Worker {
 
   private _getStatus() {
     let status = {}
-    const statusFile = `${this.artifactsDir}/status.json`
+    const statusFile = `${this.buildFolder}/status.json`
     if (fs.existsSync(statusFile)) {
       try {
         status = JSON.parse(fs.readFileSync(statusFile).toString())
@@ -132,12 +140,12 @@ export default class Worker {
   }
 
   private _writeStatusToFile(status) {
-    const statusFile = `${this.artifactsDir}/status.json`
+    const statusFile = `${this.buildFolder}/status.json`
     fs.writeFileSync(statusFile, JSON.stringify(status, null, 2)) // Indent 2 spaces
   }
 
-  private _getArtifact(job) {
-    return JSON.parse(fs.readFileSync(`${this.artifactsDir}/${job.contract}.json`).toString())
+  private _getArtifact(contract) {
+    return JSON.parse(fs.readFileSync(`${this.artifactsDir}/${contract}.json`).toString())
   }
 
   static delay(s: number) {
