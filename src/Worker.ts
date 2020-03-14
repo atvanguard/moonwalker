@@ -26,7 +26,8 @@ export default class Worker {
       const status = this._getJobStatus(job.id)
       if (status == 'progress') {
         const receipt = await this.waitForConfirmation(job.id)
-        return this._onJobCompletion(job, receipt)
+        this._onJobCompletion(job, receipt)
+        return this.queue.channel.ack(msg)
       } else if (status == 'complete') {
         return this.queue.channel.ack(msg)
       }
@@ -57,7 +58,7 @@ export default class Worker {
   }
 
   private _onJobCompletion(job, receipt) {
-    console.log('job completed')
+    console.log(`job ${job.id} completed`)
     const status = this._getStatus()
     if (receipt.status == false) {
       status[job.id].status = 'reverted'
@@ -120,6 +121,7 @@ export default class Worker {
     while (true) {
       if (await this.web3Client.isConfirmed(txHash, this.blockConfirmation)) {
         console.log(txHash, 'confirmed')
+        await Worker.delay(4) // on görli, retrieving the receipt too soon returns null
         return this.web3Client.web3.eth.getTransactionReceipt(txHash)
       }
       await Worker.delay(5) // something like blockConfirmation * blockTime
