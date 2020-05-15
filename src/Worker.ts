@@ -121,8 +121,9 @@ export default class Worker {
     while (true) {
       if (await this.web3Client.isConfirmed(txHash, this.blockConfirmation)) {
         console.log(txHash, 'confirmed')
-        await Worker.delay(4) // on görli, retrieving the receipt too soon returns null
-        return this.web3Client.web3.eth.getTransactionReceipt(txHash)
+        const receipt = await this.web3Client.web3.eth.getTransactionReceipt(txHash)
+        // on görli, retrieving the receipt too soon returns null sometimes
+        if (receipt != null) return receipt
       }
       await Worker.delay(5) // something like blockConfirmation * blockTime
     }
