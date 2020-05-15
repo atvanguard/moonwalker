@@ -207,7 +207,7 @@ var Worker = /** @class */ (function () {
     };
     Worker.prototype.waitForConfirmation = function (jobId) {
         return __awaiter(this, void 0, void 0, function () {
-            var status, job, txHash;
+            var status, job, txHash, receipt;
             return __generator(this, function (_a) {
                 switch (_a.label) {
                     case 0:
@@ -222,10 +222,15 @@ var Worker = /** @class */ (function () {
                     case 2:
                         if (!_a.sent()) return [3 /*break*/, 4];
                         console.log(txHash, 'confirmed');
-                        return [4 /*yield*/, Worker.delay(4)]; // on görli, retrieving the receipt too soon returns null
+                        return [4 /*yield*/, this.web3Client.web3.eth.getTransactionReceipt(txHash)
+                            // on görli, retrieving the receipt too soon returns null sometimes
+                        ];
                     case 3:
-                        _a.sent(); // on görli, retrieving the receipt too soon returns null
-                        return [2 /*return*/, this.web3Client.web3.eth.getTransactionReceipt(txHash)];
+                        receipt = _a.sent();
+                        // on görli, retrieving the receipt too soon returns null sometimes
+                        if (receipt != null)
+                            return [2 /*return*/, receipt];
+                        _a.label = 4;
                     case 4: return [4 /*yield*/, Worker.delay(5)]; // something like blockConfirmation * blockTime
                     case 5:
                         _a.sent(); // something like blockConfirmation * blockTime
