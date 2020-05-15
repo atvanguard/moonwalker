@@ -74,7 +74,8 @@ var Worker = /** @class */ (function () {
                         return [4 /*yield*/, this.waitForConfirmation(job.id)];
                     case 1:
                         receipt_1 = _a.sent();
-                        return [2 /*return*/, this._onJobCompletion(job, receipt_1)];
+                        this._onJobCompletion(job, receipt_1);
+                        return [2 /*return*/, this.queue.channel.ack(msg)];
                     case 2:
                         if (status == 'complete') {
                             return [2 /*return*/, this.queue.channel.ack(msg)];
@@ -121,7 +122,7 @@ var Worker = /** @class */ (function () {
         return job ? job.status : 'process';
     };
     Worker.prototype._onJobCompletion = function (job, receipt) {
-        console.log('job completed');
+        console.log("job " + job.id + " completed");
         var status = this._getStatus();
         if (receipt.status == false) {
             status[job.id].status = 'reverted';
@@ -216,18 +217,20 @@ var Worker = /** @class */ (function () {
                         console.log('waiting for job', job, 'to get confirmed');
                         _a.label = 1;
                     case 1:
-                        if (!true) return [3 /*break*/, 4];
+                        if (!true) return [3 /*break*/, 6];
                         return [4 /*yield*/, this.web3Client.isConfirmed(txHash, this.blockConfirmation)];
                     case 2:
-                        if (_a.sent()) {
-                            console.log(txHash, 'confirmed');
-                            return [2 /*return*/, this.web3Client.web3.eth.getTransactionReceipt(txHash)];
-                        }
-                        return [4 /*yield*/, Worker.delay(5)]; // something like blockConfirmation * blockTime
+                        if (!_a.sent()) return [3 /*break*/, 4];
+                        console.log(txHash, 'confirmed');
+                        return [4 /*yield*/, Worker.delay(4)]; // on görli, retrieving the receipt too soon returns null
                     case 3:
+                        _a.sent(); // on görli, retrieving the receipt too soon returns null
+                        return [2 /*return*/, this.web3Client.web3.eth.getTransactionReceipt(txHash)];
+                    case 4: return [4 /*yield*/, Worker.delay(5)]; // something like blockConfirmation * blockTime
+                    case 5:
                         _a.sent(); // something like blockConfirmation * blockTime
                         return [3 /*break*/, 1];
-                    case 4: return [2 /*return*/];
+                    case 6: return [2 /*return*/];
                 }
             });
         });
