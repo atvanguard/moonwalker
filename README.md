@@ -1,6 +1,6 @@
 # Moonwalker
 
-Moonwalker is a utility for sending transactions to the ethereum network in a robust manner. It currently **just** supports deploying truffle artifacts.
+Moonwalker is a utility for sending transactions to the ethereum network in a robust manner.
 
 Following are some of the features:
 - Waits for pending transactions indefintely, if the requirement is to send transactions in a sequential manner.
@@ -9,8 +9,8 @@ Following are some of the features:
 - Possible to parallelize deployment tasks.
 
 ### How it works
-1. Moonwalker requires a rabbitMq to send to and process (deployment) tasks from.
+1. Moonwalker requires a rabbitMq to send to and process tasks from.
 2. The [Sender](./src/Sender.ts) is used to queue the tasks.
-3. The [Worker](./src/Worker.ts) listens to the queue, processes the truffle artifact and sends transactions.
+3. The [Worker](./src/Worker.ts) listens to the queue, processes the truffle artifact and also sends transactions.
 
 For specific instructions to use Moonwalker, please refer to the Matic Network contracts deployment [notes](https://github.com/maticnetwork/contracts/tree/release-betaV2/moonwalker-migrations).
