@@ -1,8 +1,9 @@
 import Web3 from 'web3'
+import { SendOptions } from 'web3-eth-contract'
 
 export default class Web3Client {
   public web3: Web3
-  private options: Object
+  private options: SendOptions
 
   constructor(provider, options) {
     this.web3 = new Web3(provider)
